@@ -1,159 +1,20 @@
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
 import { hashPassword, verifyPassword } from '../../lib/password.js';
+import { prisma } from '../../lib/prisma.js';
 import { signAccessToken, signRefreshToken } from '../../lib/jwt.js';
 
-const prisma = new PrismaClient();
-
-const registerSchema = z.object({
-  email: z.string().email('Email invalid').toLowerCase(),
-  password: z
-    .string()
-    .min(8, 'Minim 8 caractere')
-    .regex(/[A-Z]/, 'Trebuie o litera mare')
-    .regex(/[a-z]/, 'Trebuie o litera mica')
-    .regex(/[0-9]/, 'Trebuie o cifra'),
-  full_name: z.string().min(2).max(150).optional(),
-});
-
-const loginSchema = z.object({
-  email: z.string().email().toLowerCase(),
-  password: z.string().min(1),
-});
-
+const registerSchema = z.object({ email: z.string().email('Email invalid').toLowerCase(), password: z.string().min(8, 'Minim 8 caractere').regex(/[A-Z]/, 'Trebuie o litera mare').regex(/[a-z]/, 'Trebuie o litera mica').regex(/[0-9]/, 'Trebuie o cifra'), full_name: z.string().trim().min(2).max(150).optional() });
+const loginSchema = z.object({ email: z.string().email('Email invalid').toLowerCase(), password: z.string().min(1) });
+const refreshSchema = z.object({ refresh_token: z.string().min(1).optional(), refreshToken: z.string().min(1).optional() }).refine((v) => v.refresh_token || v.refreshToken, 'Refresh token lipsa');
+const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
+type PublicUser = { id: string; email: string; fullName: string | null; createdAt: Date };
+async function issueTokens(app: FastifyInstance, user: PublicUser) { const jti = randomUUID(); const refreshToken = signRefreshToken(app, { sub: user.id, email: user.email, jti }); await prisma.refreshToken.create({ data: { jti, tokenHash: tokenHash(refreshToken), userId: user.id, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } }); return { access_token: signAccessToken(app, { sub: user.id, email: user.email }), refresh_token: refreshToken, expires_in: 900, token_type: 'Bearer' }; }
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/register', async (req, reply) => {
-    const input = registerSchema.parse(req.body);
-
-    const existing = await prisma.user.findUnique({
-      where: { email: input.email },
-    });
-
-    if (existing) {
-      return reply.status(409).send({
-        status: 409,
-        title: 'Conflict',
-        detail: 'Exista deja un cont cu acest email.',
-      });
-    }
-
-    const passwordHash = await hashPassword(input.password);
-
-    const user = await prisma.user.create({
-      data: {
-        email: input.email,
-        passwordHash,
-        fullName: input.full_name,
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        createdAt: true,
-      },
-    });
-
-    const accessToken = signAccessToken(app, {
-      sub: user.id,
-      email: user.email,
-    });
-    const refreshToken = signRefreshToken(app, {
-      sub: user.id,
-      email: user.email,
-    });
-
-    return reply.status(201).send({
-      user,
-      tokens: {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_in: 900,
-        token_type: 'Bearer',
-      },
-    });
-  });
-
-  app.post('/login', async (req, reply) => {
-    const input = loginSchema.parse(req.body);
-
-    const user = await prisma.user.findUnique({
-      where: { email: input.email },
-    });
-
-    if (!user) {
-      return reply.status(401).send({
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Email sau parola incorecta.',
-      });
-    }
-
-    const valid = await verifyPassword(user.passwordHash, input.password);
-    if (!valid) {
-      return reply.status(401).send({
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Email sau parola incorecta.',
-      });
-    }
-
-    const accessToken = signAccessToken(app, {
-      sub: user.id,
-      email: user.email,
-    });
-    const refreshToken = signRefreshToken(app, {
-      sub: user.id,
-      email: user.email,
-    });
-
-    return reply.send({
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        createdAt: user.createdAt,
-      },
-      tokens: {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_in: 900,
-        token_type: 'Bearer',
-      },
-    });
-  });
-
-  app.get('/me', async (req, reply) => {
-    try {
-      await req.jwtVerify();
-    } catch {
-      return reply.status(401).send({
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Token invalid sau lipsa.',
-      });
-    }
-
-    const userId = req.user.sub;
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        createdAt: true,
-      },
-    });
-
-    if (!user) {
-      return reply.status(404).send({
-        status: 404,
-        title: 'Not Found',
-        detail: 'Utilizatorul nu exista.',
-      });
-    }
-
-    return reply.send({ user });
-  });
+  app.post('/register', async (req, reply) => { const input = registerSchema.parse(req.body); const passwordHash = await hashPassword(input.password); const user = await prisma.user.create({ data: { email: input.email, passwordHash, fullName: input.full_name }, select: { id: true, email: true, fullName: true, createdAt: true } }); return reply.status(201).send({ user, tokens: await issueTokens(app, user) }); });
+  app.post('/login', async (req, reply) => { const input = loginSchema.parse(req.body); const user = await prisma.user.findUnique({ where: { email: input.email }, select: { id: true, email: true, fullName: true, createdAt: true, passwordHash: true } }); if (!user || !(await verifyPassword(user.passwordHash, input.password))) return reply.status(401).send({ error: { code: 'INVALID_CREDENTIALS', message: 'Email sau parola incorecta.' } }); const { passwordHash: _, ...publicUser } = user; return reply.send({ user: publicUser, tokens: await issueTokens(app, publicUser) }); });
+  app.post('/refresh', async (req, reply) => { const input = refreshSchema.parse(req.body); const token = input.refresh_token ?? input.refreshToken!; let payload; try { payload = app.jwt.verify<{ sub: string; email: string; type?: string; jti?: string }>(token); } catch { return reply.status(401).send({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Refresh token invalid sau expirat.' } }); } if (payload.type !== 'refresh' || !payload.jti) return reply.status(401).send({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Refresh token invalid.' } }); const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } }); if (!stored || stored.revokedAt || stored.expiresAt <= new Date() || stored.tokenHash !== tokenHash(token)) return reply.status(401).send({ error: { code: 'REVOKED_REFRESH_TOKEN', message: 'Refresh token invalid sau revocat.' } }); const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true, fullName: true, createdAt: true } }); if (!user) return reply.status(401).send({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Utilizatorul nu exista.' } }); await prisma.refreshToken.update({ where: { jti: payload.jti }, data: { revokedAt: new Date() } }); return reply.send({ user, tokens: await issueTokens(app, user) }); });
+  app.post('/logout', async (req, reply) => { const input = refreshSchema.parse(req.body); const token = input.refresh_token ?? input.refreshToken!; try { const payload = app.jwt.verify<{ jti?: string; type?: string }>(token); if (payload.type === 'refresh' && payload.jti) await prisma.refreshToken.updateMany({ where: { jti: payload.jti, tokenHash: tokenHash(token), revokedAt: null }, data: { revokedAt: new Date() } }); } catch { /* logout is idempotent */ } return reply.status(204).send(); });
+  app.get('/me', async (req, reply) => { await req.jwtVerify(); const user = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { id: true, email: true, fullName: true, createdAt: true } }); if (!user) return reply.status(404).send({ error: { code: 'USER_NOT_FOUND', message: 'Utilizatorul nu exista.' } }); return reply.send({ user }); });
 }

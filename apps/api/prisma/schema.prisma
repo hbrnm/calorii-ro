@@ -1,59 +1,9 @@
 generator client {
   provider = "prisma-client-js"
 }
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  fullName     String?  @map("full_name") @db.VarChar(150)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  meals        Meal[]
-  @@map("users")
-}
-
-model Food {
-  id              Int      @id @default(autoincrement())
-  nameRo          String   @map("name_ro") @db.VarChar(200)
-  nameEn          String?  @map("name_en") @db.VarChar(200)
-  caloriesKcal    Decimal  @map("calories_kcal") @db.Decimal(7, 2)
-  proteinG        Decimal  @default(0) @map("protein_g") @db.Decimal(6, 2)
-  carbsG          Decimal  @default(0) @map("carbs_g") @db.Decimal(6, 2)
-  fatG            Decimal  @default(0) @map("fat_g") @db.Decimal(6, 2)
-  isTraditionalRo Boolean  @default(false) @map("is_traditional_ro")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  mealItems       MealItem[]
-  @@map("foods")
-}
-
-model Meal {
-  id        String     @id @default(uuid()) @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  mealType  String     @map("meal_type") @db.VarChar(20)
-  mealDate  DateTime   @default(now()) @map("meal_date") @db.Date
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     MealItem[]
-  @@index([userId, mealDate(sort: Desc)])
-  @@map("meals")
-}
-
-model MealItem {
-  id            Int      @id @default(autoincrement())
-  mealId        String   @map("meal_id") @db.Uuid
-  foodId        Int      @map("food_id")
-  quantity      Decimal  @db.Decimal(7, 2)
-  gramsConsumed Decimal  @map("grams_consumed") @db.Decimal(7, 2)
-  kcal          Decimal  @db.Decimal(8, 2)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  meal          Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
-  food          Food     @relation(fields: [foodId], references: [id])
-  @@index([mealId])
-  @@map("meal_items")
-}
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+model User { id String @id @default(uuid()) @db.Uuid email String @unique passwordHash String @map("password_hash") fullName String? @map("full_name") @db.VarChar(150) createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6) updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6) meals Meal[] refreshTokens RefreshToken[] @@map("users") }
+model RefreshToken { id String @id @default(uuid()) @db.Uuid jti String @unique tokenHash String @unique @map("token_hash") userId String @map("user_id") @db.Uuid expiresAt DateTime @map("expires_at") @db.Timestamptz(6) revokedAt DateTime? @map("revoked_at") createdAt DateTime @default(now()) @map("created_at") user User @relation(fields: [userId], references: [id], onDelete: Cascade) @@index([userId, revokedAt]) @@map("refresh_tokens") }
+model Food { id Int @id @default(autoincrement()) nameRo String @map("name_ro") @db.VarChar(200) nameEn String? @map("name_en") @db.VarChar(200) caloriesKcal Decimal @map("calories_kcal") @db.Decimal(7, 2) proteinG Decimal @default(0) @map("protein_g") @db.Decimal(6, 2) carbsG Decimal @default(0) @map("carbs_g") @db.Decimal(6, 2) fatG Decimal @default(0) @map("fat_g") @db.Decimal(6, 2) isTraditionalRo Boolean @default(false) @map("is_traditional_ro") createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6) mealItems MealItem[] @@map("foods") }
+model Meal { id String @id @default(uuid()) @db.Uuid userId String @map("user_id") @db.Uuid mealType String @map("meal_type") @db.VarChar(20) mealDate DateTime @default(now()) @map("meal_date") @db.Date createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6) user User @relation(fields: [userId], references: [id], onDelete: Cascade) items MealItem[] @@unique([userId, mealDate, mealType]) @@index([userId, mealDate(sort: Desc)]) @@map("meals") }
+model MealItem { id Int @id @default(autoincrement()) mealId String @map("meal_id") @db.Uuid foodId Int @map("food_id") quantity Decimal @db.Decimal(7, 2) gramsConsumed Decimal @map("grams_consumed") @db.Decimal(7, 2) kcal Decimal @db.Decimal(8, 2) proteinG Decimal @map("protein_g") carbsG Decimal @map("carbs_g") fatG Decimal @map("fat_g") createdAt DateTime @default(now()) @map("created_at") meal Meal @relation(fields: [mealId], references: [id], onDelete: Cascade) food Food @relation(fields: [foodId], references: [id]) @@index([mealId]) @@map("meal_items") }

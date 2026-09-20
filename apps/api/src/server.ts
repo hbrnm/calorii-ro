@@ -1,85 +1,14 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/routes.js';
 import { foodRoutes } from './modules/foods/routes.js';
 import { diaryRoutes } from './modules/diary/routes.js';
-
-const prisma = new PrismaClient();
-
-const app = Fastify({
-  logger: {
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: true },
-    },
-  },
-});
-
-async function start() {
-  await app.register(cors, {
-    origin: true,
-    credentials: true,
-  });
-
-  await app.register(jwt, {
-    secret: process.env.JWT_SECRET ?? 'dev-secret-change-me-32-chars-minimum',
-  });
-
-  app.get('/health', async () => ({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'calorii-api',
-    version: '0.1.0',
-  }));
-
-  app.get('/health/db', async () => {
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-      const userCount = await prisma.user.count();
-      const foodCount = await prisma.food.count();
-      const mealCount = await prisma.meal.count();
-      return {
-        database: 'connected',
-        stats: {
-          users: userCount,
-          foods: foodCount,
-          meals: mealCount,
-        },
-      };
-    } catch (error) {
-      return {
-        database: 'error',
-        message: (error as Error).message,
-      };
-    }
-  });
-
-  await app.register(authRoutes, { prefix: '/auth' });
-  await app.register(foodRoutes, { prefix: '/foods' });
-  await app.register(diaryRoutes);
-
-  try {
-    const port = parseInt(process.env.PORT ?? '3000', 10);
-    await app.listen({ port, host: '0.0.0.0' });
-    console.log('\n Server: http://localhost:' + port);
-    console.log(' Health: http://localhost:' + port + '/health');
-    console.log(' DB: http://localhost:' + port + '/health/db');
-    console.log(' Auth: http://localhost:' + port + '/auth');
-    console.log(' Foods: http://localhost:' + port + '/foods');
-    console.log(' Diary: http://localhost:' + port + '/diary\n');
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
-  }
-}
-
-process.on('SIGINT', async () => {
-  console.log('\n Inchid serverul...');
-  await prisma.$disconnect();
-  await app.close();
-  process.exit(0);
-});
-
-start();
+import { prisma } from './lib/prisma.js';
+function jwtSecret() { const secret = process.env.JWT_SECRET; if (!secret && process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET este obligatoriu in production.'); if (secret && secret.length < 32) throw new Error('JWT_SECRET trebuie sa aiba cel putin 32 de caractere.'); return secret ?? 'dev-secret-change-me-32-chars-minimum'; }
+function corsOrigins() { const configured = (process.env.FRONTEND_URL ?? '').split(',').map((v) => v.trim()).filter(Boolean); return process.env.NODE_ENV === 'production' ? configured : [...configured, 'http://localhost:3000', 'http://localhost:5173']; }
+export function buildApp() { const app = Fastify({ logger: { transport: { target: 'pino-pretty', options: { colorize: true } } } }); app.register(cors, { origin: corsOrigins(), credentials: true }); app.register(jwt, { secret: jwtSecret() }); app.setErrorHandler((error, req, reply) => { if (error instanceof ZodError) return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: error.issues.map((i) => i.message).join(', ') } }); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return reply.status(409).send({ error: { code: 'CONFLICT', message: 'Resursa exista deja.' } }); const status = error.statusCode && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 500; req.log.error(error); return reply.status(status).send({ error: { code: status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR', message: status === 500 ? 'A aparut o eroare interna.' : error.message } }); }); app.get('/health', async () => ({ status: 'ok', service: 'calorii-api', version: '0.1.0' })); app.get('/health/db', async (_req, reply) => { try { await prisma.$queryRaw`SELECT 1`; return { status: 'ok', database: 'connected' }; } catch { return reply.status(503).send({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Baza de date nu este disponibila.' } }); } }); app.register(authRoutes, { prefix: '/auth' }); app.register(foodRoutes, { prefix: '/foods' }); app.register(diaryRoutes); return app; }
+async function start() { const app = buildApp(); try { const port = Number.parseInt(process.env.PORT ?? '3000', 10); await app.listen({ port, host: '0.0.0.0' }); } catch (error) { app.log.error(error); await prisma.$disconnect(); process.exit(1); } }
+if (process.env.NODE_ENV !== 'test') void start();

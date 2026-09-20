@@ -1,21 +1,10 @@
 # CaloriiRo
 
-Jurnalul alimentar al românilor.
+Jurnal alimentar cu API Fastify, PostgreSQL și Prisma.
 
-## Ce face
+## Configurare API
 
-- 🔐 Autentificare (register/login cu JWT)
-- 🍲 20 alimente tradiționale românești
-- 🔍 Căutare alimente
-- 📊 Jurnal zilnic cu calcul nutrițional
-
-## Stack
-
-- **Backend:** Node.js + Fastify + TypeScript
-- **Bază de date:** PostgreSQL (Neon) + Prisma ORM
-- **Autentificare:** Argon2 + JWT
-
-## Instalare
+Copiază `apps/api/.env.example` în `apps/api/.env` și completează `DATABASE_URL`. În production, `JWT_SECRET` trebuie să aibă cel puțin 32 de caractere, iar `FRONTEND_URL` trebuie să conțină origin-urile permise, separate prin virgulă.
 
 ```bash
 pnpm install
@@ -25,3 +14,5 @@ pnpm prisma:migrate
 pnpm prisma:seed
 pnpm dev
 ```
+
+`GET /health` nu necesită baza de date. `GET /health/db` verifică disponibilitatea PostgreSQL.
