@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<title>Test CaloriiRo API</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 20px; background: #f8f9fa; }
+  h1 { color: #007BFF; }
+  h2 { color: #333; border-bottom: 2px solid #007BFF; padding-bottom: 8px; margin-top: 30px; }
+  input, select { padding: 10px; margin: 5px 0; width: 100%; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+  button { padding: 12px 20px; margin: 8px 0; background: #007BFF; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; width: 100%; }
+  button:hover { background: #0056b3; }
+  button.green { background: #28a745; }
+  button.green:hover { background: #1e7e34; }
+  button.red { background: #dc3545; }
+  button.red:hover { background: #b02a37; }
+  pre { background: #1e1e1e; color: #4ec9b0; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 12px; min-height: 50px; white-space: pre-wrap; word-break: break-word; max-height: 400px; }
+  .status { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 10px; }
+  .status.ok { background: #d4dde8; color: #155724; }
+  .status.err { background: #f8d7da; color: #721c24; }
+  .box { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .food-item { padding: 8px; margin: 4px 0; background: #f0f4f8; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; }
+  .food-item:hover { background: #d4dde8; }
+  .hint { color: #666; font-size: 13px; margin: 5px 0; }
+</style>
+</head>
+<body>
+
+<h1>🧪 Test CaloriiRo API</h1>
+
+<div class="box">
+  <h2>1. Register / Login <span id="authStatus" class="status"></span></h2>
+  <div class="row">
+    <input id="authEmail" placeholder="Email" value="test@calorii.ro">
+    <input id="authPassword" placeholder="Parolă" value="Parola123" type="password">
+  </div>
+  <button onclick="doAuth('register')">📝 Register</button>
+  <button onclick="doAuth('login')">🔑 Login</button>
+  <pre id="authOut">Token-ul se salvează automat...</pre>
+</div>
+
+<div class="box">
+  <h2>2. Alimente disponibile <span id="foodsStatus" class="status"></span></h2>
+  <input id="foodSearch" placeholder="Caută aliment (ex: sarmale, ciorba, mamaliga)">
+  <button onclick="loadFoods()">🔍 Caută alimente</button>
+  <div id="foodsList"></div>
+  <pre id="foodsOut">Click pe un aliment pentru a-l adăuga</pre>
+</div>
+
+<div class="box">
+  <h2>3. Adaugă masă <span id="addStatus" class="status"></span></h2>
+  <div class="row">
+    <select id="mealType">
+      <option value="">Auto (după oră)</option>
+      <option value="breakfast">Mic dejun</option>
+      <option value="lunch">Prânz</option>
+      <option value="dinner">Cină</option>
+      <option value="snack">Gustare</option>
+    </select>
+    <input id="foodId" placeholder="Food ID" type="number">
+    <input id="quantity" placeholder="Cantitate" type="number" value="1" step="0.5">
+  </div>
+  <button class="green" onclick="addMeal()">➕ Adaugă la jurnal</button>
+  <pre id="addOut">Selectează un aliment din lista de mai sus</pre>
+</div>
+
+<div class="box">
+  <h2>4. Jurnal zilnic <span id="diaryStatus" class="status"></span></h2>
+  <input id="diaryDate" type="date">
+  <button onclick="loadDiary()">📊 Vezi jurnalul zilei</button>
+  <pre id="diaryOut">Selectează o dată și click</pre>
+</div>
+
+<script>
+const API = 'http://localhost:3000';
+let token = localStorage.getItem('access_token') || '';
+
+// Set today's date
+document.getElementById('diaryDate').valueAsDate = new Date();
+
+function setStatus(id, text, ok) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+async function doAuth(action) {
+  const email = document.getElementById('authEmail').value;
+  const password = document.getElementById('authPassword').value;
+  const url = API + '/auth/' + action;
+  document.getElementById('authOut').textContent = '⏳...';
+  setStatus('authStatus', '', true);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    document.getElementById('authOut').textContent = JSON.stringify(data, null, 2);
+    setStatus('authStatus', res.status, res.ok);
+    if (data.tokens?.access_token) {
+      token = data.tokens.access_token;
+      localStorage.setItem('access_token', token);
+    }
+  } catch (e) {
+    document.getElementById('authOut').textContent = '❌ ' + e.message;
+    setStatus('authStatus', 'EȘEC', false);
+  }
+}
+
+async function loadFoods() {
+  const q = document.getElementById('foodSearch').value.trim();
+  const url = q ? API + '/foods/search?q=' + encodeURIComponent(q) : API + '/foods';
+  document.getElementById('foodsOut').textContent = '⏳...';
+  setStatus('foodsStatus', '', true);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    setStatus('foodsStatus', res.status, res.ok);
+
+    const list = document.getElementById('foodsList');
+    list.innerHTML = '';
+    for (const f of data.data) {
+      const div = document.createElement('div');
+      div.className = 'food-item';
+      div.innerHTML = '<strong>' + f.name_ro + '</strong><span>' + f.calories_kcal + ' kcal/100g</span>';
+      div.onclick = () => {
+        document.getElementById('foodId').value = f.id;
+        document.getElementById('foodsOut').textContent = '✅ Selectat: ' + f.name_ro + ' (ID: ' + f.id + ')';
+      };
+      list.appendChild(div);
+    }
+    document.getElementById('foodsOut').textContent = data.total + ' alimente găsite. Click pe unul pentru a-l selecta.';
+  } catch (e) {
+    document.getElementById('foodsOut').textContent = '❌ ' + e.message;
+    setStatus('foodsStatus', 'EȘEC', false);
+  }
+}
+
+async function addMeal() {
+  const food_id = parseInt(document.getElementById('foodId').value, 10);
+  const quantity = parseFloat(document.getElementById('quantity').value);
+  const meal_type = document.getElementById('mealType').value;
+
+  if (!food_id || !token) {
+    document.getElementById('addOut').textContent = '⚠️ Selectează un aliment + fă login mai întâi';
+    return;
+  }
+
+  const body = { food_id, quantity };
+  if (meal_type) body.meal_type = meal_type;
+
+  document.getElementById('addOut').textContent = '⏳...';
+  setStatus('addStatus', '', true);
+  try {
+    const res = await fetch(API + '/meals/quick-add', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    document.getElementById('addOut').textContent = JSON.stringify(data, null, 2);
+    setStatus('addStatus', res.status, res.ok);
+  } catch (e) {
+    document.getElementById('addOut').textContent = '❌ ' + e.message;
+    setStatus('addStatus', 'EȘEC', false);
+  }
+}
+
+async function loadDiary() {
+  const date = document.getElementById('diaryDate').value;
+  if (!date || !token) {
+    document.getElementById('diaryOut').textContent = '⚠️ Selectează data + fă login mai întâi';
+    return;
+  }
+  document.getElementById('diaryOut').textContent = '⏳...';
+  setStatus('diaryStatus', '', true);
+  try {
+    const res = await fetch(API + '/diary/' + date, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    document.getElementById('diaryOut').textContent = JSON.stringify(data, null, 2);
+    setStatus('diaryStatus', res.status, res.ok);
+  } catch (e) {
+    document.getElementById('diaryOut').textContent = '❌ ' + e.message;
+    setStatus('diaryStatus', 'EȘEC', false);
+  }
+}
+
+// Auto-load foods on page open
+loadFoods();
+</script>
+
+</body>
+</html>
